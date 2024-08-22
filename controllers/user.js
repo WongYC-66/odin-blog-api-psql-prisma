@@ -1,8 +1,9 @@
+const { PrismaClient } = require('@prisma/client')
 const asyncHandler = require("express-async-handler");
 const bcrypt = require('bcrypt')
 var jwt = require('jsonwebtoken')
 
-const User = require('../model/user')
+const prisma = new PrismaClient()
 
 // Sign in with passport session authentication
 exports.sign_in_post = asyncHandler(async (req, res, next) => {
@@ -10,7 +11,9 @@ exports.sign_in_post = asyncHandler(async (req, res, next) => {
   let jsonData = req.body
 
   // username check
-  let user = await User.findOne({ username: jsonData.username })
+  let user = await prisma.user.findFirst({
+    where: { username: jsonData.username }
+  })
 
   if (!user) {
     return res.json({
@@ -27,7 +30,10 @@ exports.sign_in_post = asyncHandler(async (req, res, next) => {
     })
   }
 
-  user = user.toJSON()  // remove sensitve information e.g password
+  // remove sensitve information e.g password
+  delete user.isAdmin
+  delete user.password
+
   // success, send JWToken to client
   jwt.sign({ user }, process.env.JWT_SECRET_KEY, { expiresIn: '1d' }, (err, token) => {
     if (err) {
@@ -44,11 +50,11 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
 
   let jsonData = req.body
 
-  let user = new User({
+  let user = {
     username: jsonData.username,
     password: jsonData.password,
     isAdmin: false
-  })
+  }
 
   // upgrade to admin if client provides admin code
   if (jsonData.adminCode === process.env.ADMIN_CODE)
@@ -57,9 +63,8 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
   // checking for erros :
 
   // 1. check if username been used
-  let userExisted = await User.findOne({ username: user.username })
-    .collation({ locale: "en", strength: 2 })
-    .exec()
+  let userExisted = await prisma.user.findFirst({ username: user.username })
+
   if (userExisted) {
     return res.json({
       error: "Username been used"
@@ -80,17 +85,24 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
     // otherwise, store hashedPassword in DB
     try {
       user.password = hashedPassword
-      await user.save();
+      await prisma.user.create({
+        data: {
+          username: user.username,
+          password: hashedPassword,
+          isAdmin: user.isAdmin
+        }
+      });
+      
       // success, send JWToken to client
       jwt.sign({ user }, process.env.JWT_SECRET_KEY, (err, token) => {
         if (err) {
           return next(err)
         }
 
-        res.json({ 
-          message : `success sign up for username : ${user.username}`,
+        res.json({
+          message: `success sign up for username : ${user.username}`,
           token
-         })
+        })
       });
     } catch (err) {
       return next(err);

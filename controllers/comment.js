@@ -1,18 +1,27 @@
+const { PrismaClient } = require('@prisma/client')
 const asyncHandler = require("express-async-handler");
 var jwt = require('jsonwebtoken')
 
-const Comment = require('../model/comment')
-const User = require('../model/user')
+const prisma = new PrismaClient()
 
 const verifyTokenExist = require('../controllers/jwt').verifyTokenExist
 
 // GET list of all comment for 1 post
 exports.comment_list = asyncHandler(async (req, res, next) => {
-  let allComments = await Comment.find({ postId: req.params.postId })
-    .populate("user")
-    .select("-password")
-    .sort({ timestamp: -1 })
-    .exec()
+
+  let allComments = await prisma.comment.findMany({
+    where: { postId: Number(req.params.postId) },
+    include: { userObj: true },
+    orderBy: { timestamp: 'desc' }
+  })
+
+  // remove sensitive password, and reformat userObj
+  allComments = allComments.map(comment => {
+    const { password, ...filteredUserObj } = comment.userObj
+    comment.user = { ...filteredUserObj }
+    delete comment.userObj
+    return comment
+  })
 
   res.json({
     message: `getting all comment for post id : ${req.params.postId}`,
@@ -40,15 +49,20 @@ exports.create_comment_post = [
         })
       }
 
-      const user = await User.findOne({ username: authData.user.username });
-      let newComment = new Comment({
-        text: jsonData.text,
-        user: user,
-        postId: req.params.postId,
-        timestamp: new Date(),
-      })
+      const user = await prisma.user.findFirst({
+        where: { username: authData.user.username }
+      });
 
-      await newComment.save()
+      let newComment = {
+        text: jsonData.text,
+        user: user.id,
+        postId: Number(req.params.postId),
+        timestamp: new Date(),
+      }
+
+      await prisma.comment.create({
+        data: { ...newComment }
+      })
 
       // succes
       res.json({
@@ -80,10 +94,20 @@ exports.comment_update_put = [
       }
 
       try {
-        var user = await User.findOne({ username: authData.user.username });
-        var oriComment = await Comment.findById(req.params.commentId)
-          .populate("user")
-          .exec();
+        // var user = await User.findOne({ username: authData.user.username });
+        var user = await prisma.user.findFirst({
+          where: { username: authData.user.username }
+        });
+        var oriComment = await prisma.comment.findFirst({
+          where: { id: Number(req.params.commentId) },
+          include: { userObj: true }
+        })
+
+        // filter sensitive data
+        const { password, ...filteredUserObj } = oriComment.userObj
+        oriComment.user = { ...filteredUserObj }
+        delete oriComment.userObj
+
       } catch {
         return res.json({
           error: "postId incorrect or error"
@@ -102,13 +126,16 @@ exports.comment_update_put = [
         return res.sendStatus(403)  // forbidden
       }
 
-      let updatedComment = new Comment({
+      let updatedComment = {
         text: jsonData.text,
         timestamp: new Date(),
-        _id: req.params.commentId
-      })
+        id: Number(req.params.commentId),
+      }
 
-      await Comment.findByIdAndUpdate(req.params.commentId, updatedComment, {});
+      await prisma.comment.update({
+        where: { id: Number(req.params.commentId) },
+        data: { ...updatedComment }
+      });
 
       // update success
       res.json({
@@ -131,10 +158,18 @@ exports.comment_delete = [
       }
 
       try {
-        var user = await User.findOne({ username: authData.user.username });
-        var oriComment = await Comment.findById(req.params.commentId)
-          .populate("user")
-          .exec();;
+        var user = await prisma.user.findFirst({
+          where: { username: authData.user.username }
+        });
+        var oriComment = await prisma.comment.findFirst({
+          where: { id: Number(req.params.commentId) },
+          include: { userObj: true }
+        })
+
+        const { password, ...filteredUserObj } = oriComment.userObj
+        oriComment.user = { ...filteredUserObj }
+        delete oriComment.userObj
+
       } catch {
         return res.json({
           error: "postId incorrect or error"
@@ -152,7 +187,9 @@ exports.comment_delete = [
         return res.sendStatus(403)  // forbidden
       }
 
-      await Comment.findByIdAndDelete(req.params.commentId, {});
+      await prisma.comment.delete({
+        where:{id: Number(req.params.commentId)}
+      })
 
       // deleted success
       res.json({

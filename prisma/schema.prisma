@@ -15,8 +15,8 @@ model Comment {
   user      Int
 
   // Relations
-  post      Post     @relation(fields: [postId], references: [id])
-  userObj   User     @relation(fields: [user], references: [id])
+  post      Post     @relation(fields: [postId], references: [id] , onDelete: Cascade) 
+  userObj   User     @relation(fields: [user], references: [id], onDelete: Cascade)
 }
 
 model Post {
@@ -28,7 +28,7 @@ model Post {
   user        Int
 
   // Relations
-  userObj     User     @relation(fields: [user], references: [id])
+  userObj     User     @relation(fields: [user], references: [id], onDelete: Cascade)
   comments    Comment[]
 }
 

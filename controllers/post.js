@@ -1,20 +1,17 @@
+const { PrismaClient } = require('@prisma/client')
 const asyncHandler = require("express-async-handler");
 var jwt = require('jsonwebtoken')
 
-const Post = require('../model/post')
-const User = require('../model/user')
-const Comment = require('../model/comment')
+const prisma = new PrismaClient()
 
 const { verifyTokenExist, extractToken } = require('../controllers/jwt')
 
 // GET list of all posts
 exports.posts_lists = asyncHandler(async (req, res, next) => {
 
-  let allPosts = await Post.find()
-    .populate("user")
-    .select("-password")
-    .sort({ timestamp: -1 })
-    .exec()
+  let allPosts = await prisma.post.findMany({
+    orderBy: { timestamp: 'desc' }
+  })
 
   // if GET request is sent with valid token
   const token = extractToken(req)
@@ -24,14 +21,17 @@ exports.posts_lists = asyncHandler(async (req, res, next) => {
     if (!authData.user || !authData.user.username)
       throw Error()
 
-    const user = await User.findOne({ username: authData.user.username });
+    const user = await prisma.user.findFirst({
+      where: { username: authData.user.username }
+    });
 
     // user not found, or not an admin
     if (!user || !user.isAdmin)
       throw Error()
 
-  } catch {
-    // if not admin, filter 
+  } catch (e) {
+    // if not admin, filter
+    console.error('prisma error : ', e)
     allPosts = allPosts.filter(p => p.isPublished)
   }
 
@@ -61,22 +61,27 @@ exports.posts_create_post = [
         })
       }
 
-      const user = await User.findOne({ username: authData.user.username });
+      const user = await prisma.user.findFirst({
+        where: { username: authData.user.username }
+      });
       // not an admin, denied
       if (!user || !user.isAdmin) {
         return res.sendStatus(403)  // forbidden
       }
 
-
-      let newPost = new Post({
+      let newPost = {
         title: jsonData.title,
         contents: jsonData.contents,
-        user: user,
+        user: user.id,
         timestamp: new Date(),
-        isPublished: jsonData.isPublished,
-      })
+        isPublished: Boolean(jsonData.isPublished),
+      }
 
-      await newPost.save()
+      await prisma.post.create({
+        data: {
+          ...newPost
+        }
+      })
 
       res.json({
         message: 'post created successfully',
@@ -90,10 +95,18 @@ exports.posts_create_post = [
 exports.posts_read_get = asyncHandler(async (req, res, next) => {
 
   try {
-    var post = await Post.findById(req.params.postId)
-      .populate("user")
-      .select("-password")
-      .exec()
+    var post = await prisma.post.findFirst({
+      where: { id: Number(req.params.postId) },
+      include: { 
+        userObj: true 
+    }
+    })
+
+    // remove password info
+    const {password, ...filteredUserObj } = post.userObj
+    post.user = {...filteredUserObj}
+    delete post.userObj
+
   } catch {
     // postId error or  not found in database
     return res.json({
@@ -117,7 +130,9 @@ exports.posts_read_get = asyncHandler(async (req, res, next) => {
       throw Error()
     }
 
-    const user = await User.findOne({ username: authData.user.username });
+    const user = await prisma.user.findFirst({
+      where: { username: authData.user.username }
+    });
 
     // user not found or not ad admin
     if (!user || !user.isAdmin)
@@ -157,29 +172,36 @@ exports.posts_update_put = [
         })
       }
 
-      const user = await User.findOne({ username: authData.user.username });
+      const user = await prisma.user.findFirst({
+        where: { username: authData.user.username }
+      });
+
       // not an admin, denied
       if (!user.isAdmin) {
         return res.sendStatus(403)  // forbidden
       }
 
-      let updatedPost = new Post({
+      let updatedPost = {
         title: jsonData.title,
         contents: jsonData.contents,
-        user: user,
+        user: user.id,
         timestamp: new Date(),
-        isPublished: jsonData.isPublished,
-        _id: req.params.postId
-      })
+        isPublished: Boolean(jsonData.isPublished),
+        id: Number(req.params.postId)
+      }
 
 
       try {
-        const result = await Post.findByIdAndUpdate(req.params.postId, updatedPost, {});
+        const result = await prisma.post.update({
+          where: {id: updatedPost.id},
+          data: {... updatedPost}
+        });
         if (!result) {
           // post not found in database
           return res.sendStatus(409)
         }
-      } catch {
+      } catch (e){
+        console.error("error : ", e)
         return res.json({
           error: "postId incorrect or error"
         })
@@ -205,21 +227,23 @@ exports.posts_delete = [
         return res.sendStatus(403)  // forbidden
       }
 
-      const user = await User.findOne({ username: authData.user.username });
+      const user = await prisma.user.findFirst({
+        where: { username: authData.user.username }
+      });
       // not an admin, denied
       if (!user.isAdmin) {
         return res.sendStatus(403)  // forbidden
       }
 
       try {
-        const result = await Post.findByIdAndDelete(req.params.postId, {});
+        // then delete all the comments belong to the post, cascading delete
+        const result = await prisma.post.delete({
+          where: {id : Number(req.params.postId)}
+        });
         if (!result) {
           // post not found in database
           return res.sendStatus(409)
         }
-
-        // then delete all the comments belong to the post
-        await Comment.deleteMany({ postId: req.params.postId });
 
       } catch {
         return res.json({
