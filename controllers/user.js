@@ -63,8 +63,10 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
   // checking for erros :
 
   // 1. check if username been used
-  let userExisted = await prisma.user.findFirst({ username: user.username })
-
+  let userExisted = await prisma.user.findFirst({ 
+    where:{username: user.username}
+  })
+  
   if (userExisted) {
     return res.json({
       error: "Username been used"
@@ -92,10 +94,11 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
           isAdmin: user.isAdmin
         }
       });
-      
+
       // success, send JWToken to client
       jwt.sign({ user }, process.env.JWT_SECRET_KEY, (err, token) => {
         if (err) {
+          console.error("jwt error : ", e)
           return next(err)
         }
 
@@ -105,6 +108,7 @@ exports.sign_up_post = asyncHandler(async (req, res, next) => {
         })
       });
     } catch (err) {
+      console.error("prisma error : ", e)
       return next(err);
     }
   })

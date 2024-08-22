@@ -31,7 +31,7 @@ exports.posts_lists = asyncHandler(async (req, res, next) => {
 
   } catch (e) {
     // if not admin, filter
-    console.error('prisma error : ', e)
+    console.error('prisma error or not an admin : ', e)
     allPosts = allPosts.filter(p => p.isPublished)
   }
 

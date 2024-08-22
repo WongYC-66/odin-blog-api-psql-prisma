@@ -94,7 +94,6 @@ exports.comment_update_put = [
       }
 
       try {
-        // var user = await User.findOne({ username: authData.user.username });
         var user = await prisma.user.findFirst({
           where: { username: authData.user.username }
         });
